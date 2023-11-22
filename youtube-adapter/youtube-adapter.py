@@ -1,14 +1,17 @@
+from DbAdapterClass import MongoAdapter
+from SMDUtils import SMDUtils
 import time
 import os
 import sys
+import pymongo.collection
 from prometheus_client import start_http_server, Gauge, CollectorRegistry
 from pyyoutube import Api
 # Custom classes from here below
 sys.path.insert(0, '../common_lib/')
-from DbAdapterClass import MongoAdapter
-from SMDUtils import SMDUtils
+
 
 def set_channel_metrics(channel_ids: str):
+    # this will pull channel data and update channel stats
     print("[INFO] Getting metrics using get_channel_info")
     channels = yt_api.get_channel_info(channel_id=channel_ids)
     # this will hold channel stats document
@@ -26,16 +29,18 @@ def set_channel_metrics(channel_ids: str):
         # print('upload video playlist id: ' + ch_dict['contentDetails']['relatedPlaylists']['uploads'] )
         print("[DEBUG] metrics: " + ch_id + '|' + str(yt_stats))
     if ENABLE_DB_BACKEND:
-        # WARN: don't just use 'stats' its a reserved word!!
+        # WARN: don't just use 'stats' it's a reserved word in mongodb!!
         stats_tbl = db.get_table('sma_yt', 'yt_stats')
         db.set_by_id(stats_tbl, 'ch_stats', ch_stats)
 
+
 def set_video_metrics(playlist_ids: list):
+    # this function will pull video data from given playlist ids
     # check whether we have run this already, by checking for table existence
     table_suffix = SMDUtils.get_daily_prefix()
-    table_name = 'vid_stat_' + table_suffix
+    stats_tbl_name = 'vid_stat_' + table_suffix
     sma_yt_db = db.get_db('sma_yt')
-    table_exists = db.check_table_exists(sma_yt_db,table_name)
+    table_exists = db.check_table_exists(sma_yt_db, stats_tbl_name)
     if table_exists:
         print('[INFO] video data is already loaded. skipping')
     else:
@@ -51,52 +56,90 @@ def set_video_metrics(playlist_ids: list):
                 video_id_list.append(video_id)
 
         print('[INFO] getting details of videos')
-        vid_tbl = db.get_table('sma_yt','videos')
-        # we will create a list, and use multi insert for efficiency
-        vid_stat_list = []
-        for video_id in video_id_list:
-            print('[DEBUG] getting details for video: ' + video_id)
-            video = yt_api.get_video_by_id(video_id=video_id)
-            video_dict = video.items[0].to_dict()
-            db_vid_dict = {}
-            db_vid_dict['duration'] = video_dict['contentDetails']['duration']
-            for i in [ 'title', 'channelId', 'publishedAt']:
-                db_vid_dict[i] = video_dict['snippet'][i]
-            # updating data in video collection
-            db.set_by_id(vid_tbl,video_id, db_vid_dict)
+        vid_tbl = db.get_table('sma_yt', 'videos')
+        vid_stat_tbl = db.get_table('sma_yt', stats_tbl_name)
+        # get video data per video
+        get_video_data(video_id_list, vid_tbl, vid_stat_tbl)
+        # picking sorted videos
+        sort_videos(vid_tbl, vid_stat_tbl)
+
+
+def get_video_data(video_id_list: list, vid_tbl: pymongo.collection.Collection,
+                   vid_stat_tbl: pymongo.collection.Collection = None):
+    # we will create a list, and use multi insert for efficiency
+    vid_stat_list = []
+    for video_id in video_id_list:
+        print('[DEBUG] getting details for video: ' + video_id)
+        video = yt_api.get_video_by_id(video_id=video_id)
+        video_dict = video.items[0].to_dict()
+        db_vid_dict = {}
+        db_vid_dict['duration'] = video_dict['contentDetails']['duration']
+        for i in ['title', 'channelId', 'publishedAt']:
+            db_vid_dict[i] = video_dict['snippet'][i]
+        # updating data in video collection
+        db.set_by_id(vid_tbl, video_id, db_vid_dict)
+        if vid_stat_tbl is not None:
             # writing data to new video stats table
             yt_video_stats = dict(video_dict['statistics'])
             yt_video_stats['_id'] = video_id
             vid_stat_list.append(yt_video_stats)
-        vid_stat_tbl = db.get_table('sma_yt', table_name)
+    if vid_stat_tbl is not None:
         db.insert_many(vid_stat_tbl, vid_stat_list)
-        # picking sorted videos
-        vid_stats = {}
-        most_popular = []
-        print('[INFO] getting top 5 viewed videos from database')
-        most_viewed_cur = db.sort(vid_stat_tbl, 'viewCount', -1, 5)
-        print('[INFO] setting metrics')
-        for record in most_viewed_cur:
-            video_id = record['_id']
-            # setting metrics
-            pop_vid_views.labels(video_id=video_id).set(record['viewCount'])
-            pop_vid_likes.labels(video_id=video_id).set(record['likeCount'])
-            pop_vid_comments.labels(video_id=video_id).set(record['commentCount'])
-            most_popular.append(video_id)
-        print('[INFO] most popular videos are: ' + str(most_popular))
-        print('[INFO] getting latest 5 videos from database')
-        latest_videos = []
-        newest_videos_cur = db.sort(vid_tbl, 'publishedAt', -1, 5)
-        for record in newest_videos_cur:
-            video_id = record['_id']
-            latest_videos.append(video_id)
-        # TODO: implement ISO 8601 durations decode logic as utils method, for analysis on duration
-        print('[INFO] latest videos are: ' + str(latest_videos))
-        # adding to vid stats
-        vid_stats['most_popular'] = most_popular
-        vid_stats['latest_videos'] = latest_videos
-        stats_tbl = db.get_table('sma_yt', 'yt_stats')
-        db.set_by_id(stats_tbl, 'most_viewed_vids', vid_stats)
+
+
+def sort_videos(vid_tbl: pymongo.collection.Collection, vid_stat_tbl: pymongo.collection.Collection):
+    vid_stats = {}
+    most_popular = []
+    print('[INFO] getting top 5 viewed videos from database')
+    most_viewed_cur = db.sort(vid_stat_tbl, 'viewCount', -1, 5)
+    print('[INFO] setting metrics')
+    for record in most_viewed_cur:
+        video_id = record['_id']
+        # setting metrics
+        pop_vid_views.labels(video_id=video_id).set(record['viewCount'])
+        pop_vid_likes.labels(video_id=video_id).set(record['likeCount'])
+        pop_vid_comments.labels(video_id=video_id).set(record['commentCount'])
+        most_popular.append(video_id)
+    print('[INFO] most popular videos are: ' + str(most_popular))
+    print('[INFO] getting latest 5 videos from database')
+    latest_videos = []
+    newest_videos_cur = db.sort(vid_tbl, 'publishedAt', -1, 5)
+    for record in newest_videos_cur:
+        video_id = record['_id']
+        latest_videos.append(video_id)
+    # TODO: implement ISO 8601 durations decode logic as utils method, for analysis on duration
+    print('[INFO] latest videos are: ' + str(latest_videos))
+    # adding to vid stats
+    vid_stats['most_popular'] = most_popular
+    vid_stats['latest_videos'] = latest_videos
+    stats_tbl = db.get_table('sma_yt', 'yt_stats')
+    db.set_by_id(stats_tbl, 'most_viewed_vids', vid_stats)
+
+
+def get_comments_for_video(video_id: str, tbl_ct: pymongo.collection.Collection,
+                     tbl_comment: pymongo.collection.Collection = None):
+    # get comment threads per video
+    comment_threads = yt_api.get_comment_threads(video_id=video_id, count=None)
+    ct_list = []
+    comment_list = []
+    for ct in comment_threads.items:
+        ct_dict = ct.to_dict()
+        ct_id = ct_dict['id']
+        # TODO: only add required fields
+        ct_list.append(ct_dict)
+        # TODO: comment threads may be comments themselves - check
+        # get comments per comment thread
+        if tbl_comment is not None:
+            comments = yt_api.get_comments(parent_id=ct_id, count=None)
+            for comment in comments.items:
+                comment_dict = comment.to_dict()
+                comment_id = comment_dict['id']
+                # TODO: only add required fields
+                comment_list.append(comment_dict)
+    db.insert_many(tbl_ct, ct_list)
+    if tbl_comment is not None:
+        db.insert_many(tbl_comment, comment_list)
+
 
 if __name__ == '__main__':
     # read environmental vars
@@ -119,7 +162,7 @@ if __name__ == '__main__':
     # TODO: detect error when session times out and handle reconnect
     yt_api = Api(api_key=YT_API_KEY)
     # create new registry for our metrics.
-    # This also allows to supress exposing default python process metrics via default registry 'REGISTRY'
+    # This also allows to suppress exposing default python process metrics via default registry 'REGISTRY'
     yt_reg = CollectorRegistry()
     # initialise metrics
     # syntax: Gauge(var_name, var_help, list of labels we can choose when setting var, registry)
