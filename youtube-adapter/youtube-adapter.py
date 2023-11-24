@@ -1,11 +1,11 @@
 from DbAdapterClass import MongoAdapter
 from SMDUtils import SMDUtils
+from YtHelper import YtHelper
 import time
 import os
 import sys
 import pymongo.collection
 from prometheus_client import start_http_server, Gauge, CollectorRegistry
-from pyyoutube import Api
 # Custom classes from here below
 sys.path.insert(0, '../common_lib/')
 
@@ -44,47 +44,21 @@ def set_video_metrics(playlist_ids: list):
     if table_exists:
         print('[INFO] video data is already loaded. skipping')
     else:
-        # first, you need to get 'upload' playlist's items, retrieve the video id from there, and then get the status
-        video_id_list = []
-        for playlist_id in playlist_ids:
-            print('[INFO] Getting playlist items: ' + playlist_id)
-            playlist_items = yt_api.get_playlist_items(playlist_id=playlist_id, count=None)
-            print('[INFO] Got playlist items: ' + str(len(playlist_items.items)) + ' proceeding to get video data')
-            for playlist_item in playlist_items.items:
-                playlist_item_dict = playlist_item.to_dict()
-                video_id = playlist_item_dict['contentDetails']['videoId']
-                video_id_list.append(video_id)
-
+        # Get video ids from playlist ids. please refer YtHelper.py for this method
+        video_id_list = yt_api.sma_get_vid_ids_from_pl(playlist_ids)
         print('[INFO] getting details of videos')
         vid_tbl = db.get_table('sma_yt', 'videos')
         vid_stat_tbl = db.get_table('sma_yt', stats_tbl_name)
-        # get video data per video
-        get_video_data(video_id_list, vid_tbl, vid_stat_tbl)
+        # get video data per video. please refer YtHelper.py for this method
+        vid_doc_list, vid_stat_list = yt_api.sma_get_video_data(video_id_list)
+        # update database records
+        # TODO: no need to over-write video data once retrived.
+        for i in vid_doc_list:
+            db.set_by_id(vid_tbl, i['_id'], i)
+        # stats are freshly added per-collection
+        vid_stat_tbl.insert_many(vid_stat_list)
         # picking sorted videos
         sort_videos(vid_tbl, vid_stat_tbl)
-
-
-def get_video_data(video_id_list: list, vid_tbl: pymongo.collection.Collection,
-                   vid_stat_tbl: pymongo.collection.Collection = None):
-    # we will create a list, and use multi insert for efficiency
-    vid_stat_list = []
-    for video_id in video_id_list:
-        print('[DEBUG] getting details for video: ' + video_id)
-        video = yt_api.get_video_by_id(video_id=video_id)
-        video_dict = video.items[0].to_dict()
-        db_vid_dict = {}
-        db_vid_dict['duration'] = video_dict['contentDetails']['duration']
-        for i in ['title', 'channelId', 'publishedAt']:
-            db_vid_dict[i] = video_dict['snippet'][i]
-        # updating data in video collection
-        db.set_by_id(vid_tbl, video_id, db_vid_dict)
-        if vid_stat_tbl is not None:
-            # writing data to new video stats table
-            yt_video_stats = dict(video_dict['statistics'])
-            yt_video_stats['_id'] = video_id
-            vid_stat_list.append(yt_video_stats)
-    if vid_stat_tbl is not None:
-        db.insert_many(vid_stat_tbl, vid_stat_list)
 
 
 def sort_videos(vid_tbl: pymongo.collection.Collection, vid_stat_tbl: pymongo.collection.Collection):
@@ -116,31 +90,6 @@ def sort_videos(vid_tbl: pymongo.collection.Collection, vid_stat_tbl: pymongo.co
     db.set_by_id(stats_tbl, 'most_viewed_vids', vid_stats)
 
 
-def get_comments_for_video(video_id: str, tbl_ct: pymongo.collection.Collection,
-                     tbl_comment: pymongo.collection.Collection = None):
-    # get comment threads per video
-    comment_threads = yt_api.get_comment_threads(video_id=video_id, count=None)
-    ct_list = []
-    comment_list = []
-    for ct in comment_threads.items:
-        ct_dict = ct.to_dict()
-        ct_id = ct_dict['id']
-        # TODO: only add required fields
-        ct_list.append(ct_dict)
-        # TODO: comment threads may be comments themselves - check
-        # get comments per comment thread
-        if tbl_comment is not None:
-            comments = yt_api.get_comments(parent_id=ct_id, count=None)
-            for comment in comments.items:
-                comment_dict = comment.to_dict()
-                comment_id = comment_dict['id']
-                # TODO: only add required fields
-                comment_list.append(comment_dict)
-    db.insert_many(tbl_ct, ct_list)
-    if tbl_comment is not None:
-        db.insert_many(tbl_comment, comment_list)
-
-
 if __name__ == '__main__':
     # read environmental vars
     YT_API_KEY = os.environ['YT_API_KEY']
@@ -160,7 +109,7 @@ if __name__ == '__main__':
         db = MongoAdapter(DB_SERVER_URL)
     # creating python-youtube client
     # TODO: detect error when session times out and handle reconnect
-    yt_api = Api(api_key=YT_API_KEY)
+    yt_api = YtHelper(api_key=YT_API_KEY)
     # create new registry for our metrics.
     # This also allows to suppress exposing default python process metrics via default registry 'REGISTRY'
     yt_reg = CollectorRegistry()

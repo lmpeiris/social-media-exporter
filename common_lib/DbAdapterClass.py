@@ -38,14 +38,15 @@ class MongoAdapter(DbAdapter):
         table.insert_many(record_list)
         print('[INFO] inserted records: ' + str(len(record_list)))
 
-    def get_by_id(self, table: pymongo.collection.Collection, id: str) -> dict:
-        record = table.find_one({'_id': id})
+    def get_by_id(self, table: pymongo.collection.Collection, value_for_id: str) -> dict:
+        record = table.find_one({'_id': value_for_id})
         return record
 
-    def set_by_id(self, table: pymongo.collection.Collection, id: str, record: dict):
+    def set_by_id(self, table: pymongo.collection.Collection, value_for_id: str, record: dict):
         edited_dict = dict(record)
-        edited_dict['_id'] = id
-        table.replace_one({'_id': id}, edited_dict, True)
+        # this replace _id if it exists in the dict
+        edited_dict['_id'] = value_for_id
+        table.replace_one({'_id': value_for_id}, edited_dict, True)
 
     def check_table_exists(self, db: pymongo.database.Database, table_name: str) -> bool:
         collection_list = db.list_collection_names()
