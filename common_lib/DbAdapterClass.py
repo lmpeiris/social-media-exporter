@@ -5,7 +5,8 @@ class DbAdapter:
         # for now, just a placeholder
         print('[INFO] creating db adapter to ' + db_url)
         self.table_stack = {}
-        # TODO: all subclasses have mostly similar names, and uses 'table' for 'collection, this is to streamline method names when plugging into mysql / postgre / influxdb adapters later
+        # TODO: all subclasses have mostly similar names, and uses 'table' for 'collection,
+        #  this is to streamline method names when plugging into mysql / postgre / influxdb adapters later
 
 
 class MongoAdapter(DbAdapter):
