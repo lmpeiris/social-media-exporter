@@ -1,13 +1,12 @@
-from DbAdapterClass import MongoAdapter
-from SMDUtils import SMDUtils
 from YtHelper import YtHelper
+from prometheus_client import start_http_server, Gauge, CollectorRegistry
 import time
 import os
-import sys
 import pymongo.collection
-from prometheus_client import start_http_server, Gauge, CollectorRegistry
-# Custom classes from here below
+import sys
 sys.path.insert(0, '../common_lib/')
+from DbAdapterClass import MongoAdapter
+from SMDUtils import SMDUtils
 
 
 def set_channel_metrics(channel_ids: str):
@@ -88,6 +87,17 @@ def sort_videos(vid_tbl: pymongo.collection.Collection, vid_stat_tbl: pymongo.co
     vid_stats['latest_videos'] = latest_videos
     stats_tbl = db.get_table('sma_yt', 'yt_stats')
     db.set_by_id(stats_tbl, 'most_viewed_vids', vid_stats)
+    # populate comment threads (ct)/ comments, only for the most popular.
+    ct_tbl = db.get_table('sma_yt', 'ct')
+    comments_tbl = db.get_table('sma_yt', 'comments')
+    # TODO: create a logic to avoid reloading by checking video id on ct table
+    for i in most_popular:
+        ct_list, comment_list = yt_api.sma_get_comments_for_vid(i)
+        # replace records if exists
+        for x in ct_list:
+            ct_tbl.replace_one({'_id': x['_id']}, x, True)
+        for y in comment_list:
+            comments_tbl.replace_one({'_id': y['_id']}, y, True)
 
 
 if __name__ == '__main__':
