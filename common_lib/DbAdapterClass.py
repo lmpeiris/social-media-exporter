@@ -1,3 +1,4 @@
+import pandas as pd
 
 
 class DbAdapter:
@@ -66,3 +67,55 @@ class MongoAdapter(DbAdapter):
         for entry in sorted_cursor:
             sorted_list.append(entry)
         return sorted_list
+
+
+class MongoDS:
+    import pymongo.collection
+    import pandas.core.frame
+
+    def __init__(self):
+        print('MongoDS initialised')
+
+    @classmethod
+    def table_to_df(cls, table: pymongo.collection.Collection, field_list: list,  search_dict: dict = None) \
+            -> pandas.core.frame.DataFrame:
+        if search_dict is None:
+            tbl_iter = table.find()
+        else:
+            tbl_iter = table.find(search_dict)
+        # initialise root dict
+        root_dict = {}
+        for field in field_list:
+            root_dict[field] = []
+        # iterate over cursor and populate the dict
+        for row_dict in tbl_iter:
+            for field in field_list:
+                root_dict[field].append(row_dict[field])
+        # convert to pandas data frame
+        df = pd.DataFrame(data=root_dict)
+        return df
+
+    @classmethod
+    def agg_field_as_dict(cls, table: pymongo.collection.Collection, field: str, search_dict: dict = None) -> dict:
+        if search_dict is None:
+            tbl_iter = table.find()
+        else:
+            tbl_iter = table.find(search_dict)
+        total_dict = {}
+        # iterate the documents provided
+        for row_dict in tbl_iter:
+            # the dict of key value pairs we need is under 'field', this is what we need.
+            info_dict = row_dict[field]
+            # iterate through each key and populate count on total dict
+            for key in info_dict:
+                if key in total_dict:
+                    total_dict[key] = total_dict[key] + 1
+                else:
+                    total_dict[key] = 1
+        # return total dict once done
+        return total_dict
+
+
+
+
+

@@ -36,13 +36,11 @@ class Scheduler:
             # this is the best method when vast number of missed hits
             # see https://stackoverflow.com/questions/28859095/most-efficient-method-to-check-if-dictionary-key-exists-and-process-its-value-if
             if word in self.loc_dict:
-                # we are getting tuple from location dict, which is efficient storage
-                longitude, latitude = self.loc_dict[word]
                 if word in found_dict:
-                    count = found_dict[word]['count'] + 1
+                    count = found_dict[word] + 1
                 else:
                     count = 1
-                found_dict[word] = {'count': count,  'x': longitude, 'y': latitude}
+                found_dict[word] = count
         return found_dict
 
     def text_extraction(self, extract_tbl: pymongo.collection.Collection, text_field: str, schedule_type: str) -> dict:
