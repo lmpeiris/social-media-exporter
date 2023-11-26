@@ -30,24 +30,26 @@ if __name__ == '__main__':
             schedule_id = schedule['_id']
             # update schedule as running
             cur_time = datetime.datetime.now().isoformat()
-            reg_tbl.update_one({'_id': schedule_id}, {'$set': {"status": "running", "modified_time": cur_time}})
             # TODO: implement priority / created time / status based job pick-up
             schedule_type = schedule['type']
             schedule_priority = schedule['priority']
             db_name = schedule['db']
             tbl_name = schedule['table']
-            text_field = schedule['text_field']
+            text_fields = schedule['text_fields']
             target_tbl = db.get_table(db_name, tbl_name)
+            task_running = False
             if schedule_type in ['keyword_extraction', 'sentiment_analysis', 'location_extraction']:
+                reg_tbl.update_one({'_id': schedule_id}, {'$set': {"status": "running", "modified_time": cur_time}})
+                task_running = True
                 print('[INFO] executing schedule: ' + schedule_type + ' on')
                 # getattr allows to call a dynamic method from an object; here object is scheduler.
                 # report = getattr(scheduler, schedule_type)(target_tbl, schedule['text_field'])
-                report = scheduler.text_extraction(target_tbl, text_field, schedule_type)
+                report = scheduler.text_extraction(target_tbl, text_fields, schedule_type)
                 print('[INFO] ' + schedule_type + ' done on ' + db_name + ',' + tbl_name + '. modified documents: '
                       + str(report['modified_documents']))
-            # marking schedule as processed regardless whether it was processed or not
-            # reg_tbl.delete_one({'_id': schedule_id})
-            cur_time = datetime.datetime.now().isoformat()
-            reg_tbl.update_one({'_id': schedule_id}, {'$set': {"status": "completed", "modified_time": cur_time}})
+            # marking schedule as processed only if it was processed
+            if task_running:
+                cur_time = datetime.datetime.now().isoformat()
+                reg_tbl.update_one({'_id': schedule_id}, {'$set': {"status": "completed", "modified_time": cur_time}})
         print('[INFO] scheduler cycle ended ' + time.asctime())
         time.sleep(CYCLE_TIME)

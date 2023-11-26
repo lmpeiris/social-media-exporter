@@ -43,7 +43,8 @@ class Scheduler:
                 found_dict[word] = count
         return found_dict
 
-    def text_extraction(self, extract_tbl: pymongo.collection.Collection, text_field: str, schedule_type: str) -> dict:
+    def text_extraction(self, extract_tbl: pymongo.collection.Collection,
+                        text_fields: list[str], schedule_type: str) -> dict:
         # find items in extract_tbl which does not have schedule_type (same as info) field defined
         unextracted = extract_tbl.find({schedule_type: {"$exists": False}})
         count = 0
@@ -52,7 +53,11 @@ class Scheduler:
             # WARN: extracted_data field represents any kind of extracted data
             # could be a list, value or a dict
             extracted_data = None
-            text_string = document[text_field]
+            # text string is created using string join space separator
+            text_values = []
+            for i in text_fields:
+                text_values.append(document[i])
+            text_string = ' '.join(text_values)
             match schedule_type:
                 case 'keyword_extraction':
                     extracted_data = self.kwe.extract_keywords(text_string)

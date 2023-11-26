@@ -74,6 +74,7 @@ class MongoAdapter(DbAdapter):
                            'type': schedule_type, 'priority': 1, 'status': 'pending'}
         schedule_record = {**schedule_record, **additional_args}
         schedule_tbl.insert_one(schedule_record)
+        print('[INFO] schedule created: ' + str(schedule_record))
 
 
 class MongoDS:
