@@ -1,7 +1,10 @@
-from DbAdapterClass import MongoAdapter
 from Scheduler import Scheduler
 import os
 import time
+import datetime
+import sys
+sys.path.insert(0, '../common_lib/')
+from DbAdapterClass import MongoAdapter
 
 
 if __name__ == '__main__':
@@ -11,30 +14,40 @@ if __name__ == '__main__':
     # initialise classes
     db = MongoAdapter(DB_SERVER_URL)
     scheduler = Scheduler()
-    scheduler.load_locations('sl_locations.pkl')
+    scheduler.load_locations('test.pkl')
     reg_tbl = db.get_table('sma', 'advanced_schedule')
     # ------- main loop ---------
     while True:
         print('[INFO] scheduler cycle started: ' + time.asctime())
-        # read configuration from mongodb
-        for schedule in reg_tbl.find():
-            print('[DEBUG] found schedule: ' + str(schedule))
-            schedule_type = schedule['type']
-            # TODO: implement priority based job pick-up
-            schedule_priority = schedule['priority']
-            # below value is in bson, but not an issue for is
+        # read configuration from mongodb, add to a list of dicts
+        # this decoupling is safe since mongo uses a cursor to iterate, and updates can create issues
+        pending_schedules = []
+        for schedule in reg_tbl.find({'status': 'pending'}):
+            pending_schedules.append(schedule)
+        for schedule in pending_schedules:
+            print('[DEBUG] running schedule: ' + str(schedule))
+            # below object is in bson, no need to decode
             schedule_id = schedule['_id']
+            # update schedule as running
+            cur_time = datetime.datetime.now().isoformat()
+            reg_tbl.update_one({'_id': schedule_id}, {'$set': {"status": "running", "modified_time": cur_time}})
+            # TODO: implement priority / created time / status based job pick-up
+            schedule_type = schedule['type']
+            schedule_priority = schedule['priority']
+            db_name = schedule['db']
+            tbl_name = schedule['table']
+            text_field = schedule['text_field']
+            target_tbl = db.get_table(db_name, tbl_name)
             if schedule_type in ['keyword_extraction', 'sentiment_analysis', 'location_extraction']:
-                db_name = schedule['db']
-                tbl_name = schedule['table']
-                target_tbl = db.get_table(db_name, tbl_name)
-                print('[INFO] executing schedule: ' + schedule_type)
+                print('[INFO] executing schedule: ' + schedule_type + ' on')
                 # getattr allows to call a dynamic method from an object; here object is scheduler.
                 # report = getattr(scheduler, schedule_type)(target_tbl, schedule['text_field'])
-                report = scheduler.text_extraction(target_tbl, schedule['text_field'], schedule_type)
+                report = scheduler.text_extraction(target_tbl, text_field, schedule_type)
                 print('[INFO] ' + schedule_type + ' done on ' + db_name + ',' + tbl_name + '. modified documents: '
                       + str(report['modified_documents']))
-            # removing schedule regardless whether it was processed or not
-            reg_tbl.delete_one({'_id': schedule_id})
+            # marking schedule as processed regardless whether it was processed or not
+            # reg_tbl.delete_one({'_id': schedule_id})
+            cur_time = datetime.datetime.now().isoformat()
+            reg_tbl.update_one({'_id': schedule_id}, {'$set': {"status": "completed", "modified_time": cur_time}})
         print('[INFO] scheduler cycle ended ' + time.asctime())
         time.sleep(CYCLE_TIME)

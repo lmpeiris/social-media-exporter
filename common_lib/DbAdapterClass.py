@@ -68,6 +68,13 @@ class MongoAdapter(DbAdapter):
             sorted_list.append(entry)
         return sorted_list
 
+    def create_schedule(self, target_db_name: str, target_tbl_name: str, schedule_type: str, additional_args: dict):
+        schedule_tbl = self.get_table('sma', 'advanced_schedule')
+        schedule_record = {'db': target_db_name, 'table': target_tbl_name,
+                           'type': schedule_type, 'priority': 1, 'status': 'pending'}
+        schedule_record = {**schedule_record, **additional_args}
+        schedule_tbl.insert_one(schedule_record)
+
 
 class MongoDS:
     import pymongo.collection
