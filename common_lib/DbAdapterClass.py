@@ -1,4 +1,7 @@
+from bson import ObjectId
 import pandas as pd
+import datetime
+import traceback
 
 
 class DbAdapter:
@@ -33,12 +36,14 @@ class MongoAdapter(DbAdapter):
         collection = db[table_name]
         return collection
 
-    def insert(self, table: pymongo.collection.Collection, record):
-        table.insert_one(record)
+    def insert(self, table: pymongo.collection.Collection, record) -> str:
+        insert = table.insert_one(record)
+        return insert.inserted_id
 
-    def insert_many(self, table: pymongo.collection.Collection, record_list):
-        table.insert_many(record_list)
+    def insert_many(self, table: pymongo.collection.Collection, record_list) -> list:
+        insert = table.insert_many(record_list)
         print('[INFO] inserted records: ' + str(len(record_list)))
+        return insert.inserted_ids
 
     def get_by_id(self, table: pymongo.collection.Collection, value_for_id: str) -> dict:
         record = table.find_one({'_id': value_for_id})
@@ -68,13 +73,83 @@ class MongoAdapter(DbAdapter):
             sorted_list.append(entry)
         return sorted_list
 
-    def create_schedule(self, target_db_name: str, target_tbl_name: str, schedule_type: str, additional_args: dict):
-        schedule_tbl = self.get_table('sma', 'advanced_schedule')
-        schedule_record = {'db': target_db_name, 'table': target_tbl_name,
-                           'type': schedule_type, 'priority': 1, 'status': 'pending'}
-        schedule_record = {**schedule_record, **additional_args}
-        schedule_tbl.insert_one(schedule_record)
-        print('[INFO] schedule created: ' + str(schedule_record))
+
+class Schedule:
+    def __init__(self, mongo_adapter: MongoAdapter):
+        self.schedule_tbl = mongo_adapter.get_table('sma', 'advanced_schedule')
+        self.mongo_adapter = mongo_adapter
+        self.schedule_record = {}
+        # initial values, must be replaced by running create or load schedule
+        self.id_str = '000000000000000000000000'
+        self.id = ObjectId('000000000000000000000000')
+
+    def create_schedule(self, schedule_type: str, additional_args: dict,
+                        target_db_name: str = None, target_tbl_name: str = None):
+        """Initialises schedule object by creating new one"""
+        if target_tbl_name is None:
+            # table info is expected to be provided in additional_args
+            schedule_record = {'type': schedule_type, 'priority': 1, 'status': 'pending'}
+        else:
+            # this is a single table based schedule.
+            schedule_record = {'db': target_db_name, 'table': target_tbl_name,
+                               'type': schedule_type, 'priority': 1, 'status': 'pending'}
+        self.schedule_record = {**schedule_record, **additional_args}
+        inserted_record = self.schedule_tbl.insert_one(self.schedule_record)
+        self.id_str = inserted_record.inserted_id
+        self.id = ObjectId(self.id_str)
+        self.schedule_record['_id'] = self.id
+        print('[INFO] schedule created: ' + str(inserted_record))
+
+    def load_schedule(self, object_id: ObjectId) -> bool:
+        """Initialises schedule object by loading existing one"""
+        schedule_record = self.schedule_tbl.find_one({'_id': object_id, 'status': 'pending'})
+        if schedule_record is None:
+            return False
+        else:
+            self.id = object_id
+            self.id_str = str(object_id)
+            self.schedule_record = schedule_record
+            return True
+
+    def list_pending(self, schedule_types: list) -> list:
+        """List pending schedules. Use this to find an input for load_schedule"""
+        schedule_list = []
+        for st in schedule_types:
+            for schedule in self.schedule_tbl.find({'status': 'pending', 'type': st}):
+                schedule_list.append(schedule)
+        print('[INFO] found ' + str(len(schedule_list)) + ' scheduled jobs matching: ' + str(schedule_types))
+        return schedule_list
+
+    def execute_schedule(self, object_of_method: object, method_name: str) -> bool:
+        """Executes schedule by using the object and the method provided"""
+        try:
+            #TODO: execute load schedule again, to ensure?
+            schedule = self.schedule_record
+            print('[DEBUG][' + self.id_str + '] picked up schedule: ' + str(schedule))
+            # update schedule as running
+            cur_time = datetime.datetime.now().isoformat()
+            # TODO: implement priority / created time / status based job pick-up
+            schedule_type = schedule['type']
+            schedule_priority = schedule['priority']
+
+            self.schedule_tbl.update_one({'_id': self.id},
+                                         {'$set': {"status": "running", "modified_time": cur_time}})
+            print('[INFO][' + self.id_str + '] running ' + method_name + ' on: ' + cur_time)
+            # we are passing the entire schedule record to the method
+            # method should implement additional db connections etc..
+            report = getattr(object_of_method, method_name)(schedule)
+            print('[INFO][' + self.id_str + '] ' + schedule_type + ' done on: ' + cur_time + '. Report: ' + str(report))
+            cur_time = datetime.datetime.now().isoformat()
+            self.schedule_tbl.update_one({'_id': self.id},
+                                         {'$set': {"status": "completed", "modified_time": cur_time}})
+            return True
+        except:
+            cur_time = datetime.datetime.now().isoformat()
+            print('[ERROR][' + self.id_str + '] EXECUTION FAILED!!!!')
+            traceback.print_exc()
+            self.schedule_tbl.update_one({'_id': self.id},
+                                         {'$set': {"status": "failed", "modified_time": cur_time}})
+            return False
 
 
 class MongoDS:
