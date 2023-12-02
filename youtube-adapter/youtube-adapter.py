@@ -1,4 +1,4 @@
-from YtHelper import YtHelper
+from YtHelper import YtHelperMongo
 from prometheus_client import start_http_server, Gauge, CollectorRegistry
 import time
 import os
@@ -6,6 +6,7 @@ import pymongo.collection
 import sys
 sys.path.insert(0, '../common_lib/')
 from DbAdapterClass import MongoAdapter
+from DbAdapterClass import Schedule
 from SMDUtils import SMDUtils
 
 
@@ -41,7 +42,7 @@ def set_video_metrics(playlist_ids: list):
     sma_yt_db = db.get_db('sma_yt')
     table_exists = db.check_table_exists(sma_yt_db, stats_tbl_name)
     if table_exists:
-        print('[INFO] video data is already loaded. skipping')
+        print('[INFO] video data is already loaded for the day. skipping')
     else:
         # Get video ids from playlist ids. please refer YtHelper.py for this method
         video_id_list = yt_api.sma_get_vid_ids_from_pl(playlist_ids)
@@ -111,15 +112,14 @@ if __name__ == '__main__':
     # enable maintaining stats in mongodb. Required for advanced ML pods to work
     ENABLE_DB_BACKEND = SMDUtils.env_bool('ENABLE_DB_BACKEND')
     # how fast the program pulls data
-    CYCLE_TIME = 86400
+    CYCLE_TIME = 600
     ############################################
-
-    # creating mongodb connection
-    if ENABLE_DB_BACKEND:
-        db = MongoAdapter(DB_SERVER_URL)
-    # creating python-youtube client
+    # creating python-youtube client based custom class - object
     # TODO: detect error when session times out and handle reconnect
-    yt_api = YtHelper(api_key=YT_API_KEY)
+    yt_api = YtHelperMongo(api_key=YT_API_KEY)
+    # creating mongodb connection
+    db = MongoAdapter(DB_SERVER_URL)
+    yt_api.set_mongo(db)
     # create new registry for our metrics.
     # This also allows to suppress exposing default python process metrics via default registry 'REGISTRY'
     yt_reg = CollectorRegistry()
@@ -139,9 +139,14 @@ if __name__ == '__main__':
     start_http_server(9130, registry=yt_reg)
     while True:
         set_channel_metrics(CHANNEL_IDS)
-        # video metrics not supported without mongodb backend
-        if ENABLE_DB_BACKEND:
-            set_video_metrics(PLAYLIST_IDS)
+        set_video_metrics(PLAYLIST_IDS)
+        # check for jobs to pick up from the scheduler
+        query_scheduler = Schedule(db)
+        pending_schedules = query_scheduler.list_pending(['search_download'])
+        for schedule in pending_schedules:
+            scheduler = Schedule(db)
+            scheduler.load_schedule(schedule['_id'])
+            scheduler.execute_schedule(yt_api, 'sma_search_download')
         print('[INFO] current cycle ended, sleeping processing thread for seconds: ' + str(CYCLE_TIME))
         time.sleep(CYCLE_TIME)
 

@@ -62,7 +62,7 @@ class MongoAdapter(DbAdapter):
             collection_exists = True
         return collection_exists
 
-    def sort(self, table: pymongo.collection.Collection, field: str, direction: int, limit: int) -> list:
+    def sort(self, table: pymongo.collection.Collection, field: str, direction: int, limit: int) -> list[dict]:
         if limit == 0:
             sorted_cursor = table.find().sort(key_or_list=field, direction=direction)
         else:
@@ -84,15 +84,16 @@ class Schedule:
         self.id = ObjectId('000000000000000000000000')
 
     def create_schedule(self, schedule_type: str, additional_args: dict,
-                        target_db_name: str = None, target_tbl_name: str = None):
+                        target_db_name: str = None, target_tbl_name: str = None, parent_id: ObjectId = None):
         """Initialises schedule object by creating new one"""
-        if target_tbl_name is None:
-            # table info is expected to be provided in additional_args
-            schedule_record = {'type': schedule_type, 'priority': 1, 'status': 'pending'}
-        else:
-            # this is a single table based schedule.
-            schedule_record = {'db': target_db_name, 'table': target_tbl_name,
-                               'type': schedule_type, 'priority': 1, 'status': 'pending'}
+        schedule_record = {'type': schedule_type, 'priority': 1, 'status': 'pending'}
+        if target_db_name is not None:
+            schedule_record['db'] = target_db_name
+            if target_tbl_name is not None:
+                # this is a single table based schedule.
+                schedule_record['table'] = target_tbl_name
+        if parent_id is not None:
+            schedule_record['parent_id'] = parent_id
         self.schedule_record = {**schedule_record, **additional_args}
         inserted_record = self.schedule_tbl.insert_one(self.schedule_record)
         self.id_str = inserted_record.inserted_id
@@ -111,7 +112,7 @@ class Schedule:
             self.schedule_record = schedule_record
             return True
 
-    def list_pending(self, schedule_types: list) -> list:
+    def list_pending(self, schedule_types: list) -> list[dict]:
         """List pending schedules. Use this to find an input for load_schedule"""
         schedule_list = []
         for st in schedule_types:
@@ -121,7 +122,8 @@ class Schedule:
         return schedule_list
 
     def execute_schedule(self, object_of_method: object, method_name: str) -> bool:
-        """Executes schedule by using the object and the method provided"""
+        """Executes schedule by using the object and the method provided.
+        target method should only take schedule dict as arguement"""
         try:
             #TODO: execute load schedule again, to ensure?
             schedule = self.schedule_record
@@ -141,7 +143,7 @@ class Schedule:
             print('[INFO][' + self.id_str + '] ' + schedule_type + ' done on: ' + cur_time + '. Report: ' + str(report))
             cur_time = datetime.datetime.now().isoformat()
             self.schedule_tbl.update_one({'_id': self.id},
-                                         {'$set': {"status": "completed", "modified_time": cur_time}})
+                                         {'$set': {"status": "completed", "modified_time": cur_time, "report": report}})
             return True
         except:
             cur_time = datetime.datetime.now().isoformat()
