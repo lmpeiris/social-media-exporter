@@ -82,6 +82,7 @@ class Schedule:
         # initial values, must be replaced by running create or load schedule
         self.id_str = '000000000000000000000000'
         self.id = ObjectId('000000000000000000000000')
+        self.report = {}
 
     def create_schedule(self, schedule_type: str, additional_args: dict,
                         target_db_name: str = None, target_tbl_name: str = None, parent_id: ObjectId = None):
@@ -103,13 +104,16 @@ class Schedule:
 
     def load_schedule(self, object_id: ObjectId) -> bool:
         """Initialises schedule object by loading existing one"""
-        schedule_record = self.schedule_tbl.find_one({'_id': object_id, 'status': 'pending'})
+        schedule_record = self.schedule_tbl.find_one({'_id': object_id})
+        print('[DEBUG] loaded schedule details: ' + str(schedule_record))
         if schedule_record is None:
             return False
         else:
             self.id = object_id
             self.id_str = str(object_id)
             self.schedule_record = schedule_record
+            if schedule_record['status'] == 'completed':
+                self.report = schedule_record['report']
             return True
 
     def list_pending(self, schedule_types: list) -> list[dict]:
@@ -139,11 +143,13 @@ class Schedule:
             print('[INFO][' + self.id_str + '] running ' + method_name + ' on: ' + cur_time)
             # we are passing the entire schedule record to the method
             # method should implement additional db connections etc..
-            report = getattr(object_of_method, method_name)(schedule)
-            print('[INFO][' + self.id_str + '] ' + schedule_type + ' done on: ' + cur_time + '. Report: ' + str(report))
+            self.report = getattr(object_of_method, method_name)(schedule)
+            print('[INFO][' + self.id_str + '] ' + schedule_type + ' done on: ' + cur_time +
+                  '. Report: ' + str(self.report))
             cur_time = datetime.datetime.now().isoformat()
             self.schedule_tbl.update_one({'_id': self.id},
-                                         {'$set': {"status": "completed", "modified_time": cur_time, "report": report}})
+                                         {'$set': {"status": "completed", "modified_time": cur_time,
+                                                   "report": self.report}})
             return True
         except:
             cur_time = datetime.datetime.now().isoformat()
@@ -182,6 +188,7 @@ class MongoDS:
 
     @classmethod
     def agg_field_as_dict(cls, table: pymongo.collection.Collection, field: str, search_dict: dict = None) -> dict:
+        """search dict is entire search term, ex: _id: x """
         if search_dict is None:
             tbl_iter = table.find()
         else:
