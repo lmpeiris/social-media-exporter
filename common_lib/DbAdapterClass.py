@@ -168,8 +168,9 @@ class MongoDS:
         print('MongoDS initialised')
 
     @classmethod
-    def table_to_df(cls, table: pymongo.collection.Collection, field_list: list,  search_dict: dict = None) \
-            -> pandas.core.frame.DataFrame:
+    def table_to_df(cls, table: pymongo.collection.Collection, field_list: list,  search_dict: dict = None,
+                    object_id_list: list = [] ) -> pandas.core.frame.DataFrame:
+        """add to object_id_list again if a field is a object id"""
         if search_dict is None:
             tbl_iter = table.find()
         else:
@@ -181,7 +182,10 @@ class MongoDS:
         # iterate over cursor and populate the dict
         for row_dict in tbl_iter:
             for field in field_list:
-                root_dict[field].append(row_dict[field])
+                if field in object_id_list:
+                    root_dict[field].append(str(row_dict[field]))
+                else:
+                    root_dict[field].append(row_dict[field])
         # convert to pandas data frame
         df = pd.DataFrame(data=root_dict)
         return df
