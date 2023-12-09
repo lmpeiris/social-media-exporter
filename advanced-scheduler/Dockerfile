@@ -13,8 +13,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY *.py .
 
-# Expose port 9130
-EXPOSE 9130
-
 # Start the web server
-CMD ["python", "youtube-adapter.py"]
+CMD ["python", "advanced-scheduler.py"]
