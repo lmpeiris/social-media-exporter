@@ -1,21 +1,27 @@
 from pyyoutube import Api
 import sys
 import datetime
+import logging
 sys.path.insert(0, '../common_lib/')
 from DbAdapterClass import MongoAdapter
+from LMPLogger import LMPLogger
+
 
 class YtHelper(Api):
     # standard super-class init
     def __init__(self, *args, **kwargs):
         super(YtHelper, self).__init__(*args, **kwargs)
+        logger = logging.getLogger('scriptLogger')
+        self.logger = LMPLogger('YTHelper', logger)
+        self.logger.set_arg_only(str(id(self)))
 
     def sma_get_vid_ids_from_pl(self, playlist_ids: list) -> list:
         # first, you need to get 'upload' playlist's items, retrieve the video id from there, and then get the status
         video_id_list = []
         for playlist_id in playlist_ids:
-            print('[INFO] Getting playlist items: ' + playlist_id)
+            self.logger.info('Getting playlist items: ' + playlist_id)
             playlist_items = self.get_playlist_items(playlist_id=playlist_id, count=None)
-            print('[INFO] Got playlist items: ' + str(len(playlist_items.items)) + ' proceeding to get video data')
+            self.logger.info('Got playlist items: ' + str(len(playlist_items.items)) + ' proceeding to get video data')
             for playlist_item in playlist_items.items:
                 playlist_item_dict = playlist_item.to_dict()
                 video_id = playlist_item_dict['contentDetails']['videoId']
@@ -29,7 +35,7 @@ class YtHelper(Api):
         vid_stat_list = []
         insert_on = datetime.datetime.utcnow()
         for video_id in video_id_list:
-            print('[DEBUG] getting details for video: ' + video_id)
+            self.logger.debug('getting details for video: ' + video_id)
             video = self.get_video_by_id(video_id=video_id)
             video_dict = video.items[0].to_dict()
             vid_append_dict = {}
@@ -50,12 +56,12 @@ class YtHelper(Api):
         """returns ct_list, comment_list both list of dicts"""
         # get comment threads per video
         # comments threads are the top-level comments for a video.
-        print('[INFO] Getting comment data for video id: ' + video_id)
+        self.logger.info('Getting comment data for video id: ' + video_id)
         comment_threads = self.get_comment_threads(video_id=video_id, count=None)
         ct_list = []
         comment_list = []
         insert_on = datetime.datetime.utcnow()
-        print('[INFO] Received comment threads: ' + str(len(comment_threads.items)) + ' for video: ' + video_id)
+        self.logger.info('Received comment threads: ' + str(len(comment_threads.items)) + ' for video: ' + video_id)
         for ct in comment_threads.items:
             ct_dict = ct.to_dict()
             ct_id = ct_dict['id']
@@ -89,7 +95,7 @@ class YtHelper(Api):
                     comment_list.append(comment_saved_dict)
             # append comment thread
             ct_list.append(ct_saved_dict)
-        print('[INFO] found replies: ' + str(len(comment_list)) + ' for video id: ' + video_id)
+        self.logger.info('found replies: ' + str(len(comment_list)) + ' for video id: ' + video_id)
         # return as tuple
         return ct_list, comment_list
 
@@ -97,11 +103,11 @@ class YtHelper(Api):
         """ returns return_id_list, return_dict_list
         sample criteria = 'location':'6.9271, 79.8612','location_radius':'10mi',
         'published_after':'2022-07-08T00:00:00Z', 'published_before':'2022-07-10T00:00:00Z'"""
-        print('[INFO] searching for ' + str(limit) + ' videos on: ' + search_term)
+        self.logger.info('searching for ' + str(limit) + ' videos on: ' + search_term)
         if search_criteria is None:
             sr_list = self.search(q=search_term, count=limit, search_type="video")
         else:
-            print('[DEBUG] search parameters are: ' + str(search_criteria))
+            self.logger.info('search parameters are: ' + str(search_criteria))
             sr_list = self.search(location=search_criteria['location'],
                                   location_radius=search_criteria['location_radius'],
                                   q=search_term, parts=["snippet"], count=limit, search_type="video",
@@ -152,9 +158,9 @@ class YtHelperMongo(YtHelper):
             if video not in vid_id_exist:
                 vid_id_not_exist.append(video)
             else:
-                print('[DEBUG] skipping since already downloaded: ' + video)
+                self.logger.debug('skipping since already downloaded: ' + video)
         vid_doc_list, vid_stat_list = self.sma_get_video_data(vid_id_not_exist)
-        print('[INFO] inserting to video table')
+        self.logger.info('inserting to video table')
         vid_table.insert_many(vid_doc_list)
         # assume if video data not there, then comments also not
         ct_final_list = []
@@ -166,9 +172,9 @@ class YtHelperMongo(YtHelper):
                 ct_final_list.append(ct)
             for comment in comment_list:
                 comments_final_list.append(comment)
-        print('[INFO] inserting to ct table')
+        self.logger.info('inserting to ct table')
         ct_table.insert_many(ct_final_list)
-        print('[INFO] inserting to comments table')
+        self.logger.info('inserting to comments table')
         comments_table.insert_many(comments_final_list)
         report = {'vid_down_data': {'videos': str(len(vid_id_not_exist)), 'cts': str(len(ct_final_list)),
                                     'comments': str(len(comments_final_list))}}

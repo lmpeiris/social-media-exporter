@@ -13,5 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY *.py .
 
+# Copy config files
+COPY conf /conf
+
 # Start the web server
 CMD ["python", "advanced-scheduler.py"]

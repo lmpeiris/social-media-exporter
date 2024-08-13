@@ -1,8 +1,8 @@
 from DSJobExecutor import DSJobExecutor
 import os
 import time
-import datetime
 import sys
+import logging.config
 sys.path.insert(0, '../common_lib/')
 from DbAdapterClass import MongoAdapter
 from DbAdapterClass import Schedule
@@ -12,6 +12,9 @@ if __name__ == '__main__':
     # read environmental vars
     DB_SERVER_URL = os.environ['DB_SERVER_URL']
     CYCLE_TIME = 60
+    # initialise logger
+    logging.config.fileConfig('../conf/logging.conf')
+    logger = logging.getLogger('scriptLogger')
     # initialise classes
     db = MongoAdapter(DB_SERVER_URL)
     ds_job = DSJobExecutor(db)

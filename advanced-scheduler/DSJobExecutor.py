@@ -1,15 +1,19 @@
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 import yake
-import pymongo.collection
 import pickle
 import re
+import logging
 import sys
 sys.path.insert(0, '../common_lib/')
 from DbAdapterClass import MongoAdapter
+from LMPLogger import LMPLogger
 
 
 class DSJobExecutor:
     def __init__(self, mongo_adapter: MongoAdapter):
+        logger = logging.getLogger('scriptLogger')
+        self.logger = LMPLogger('DSJobExecutor', logger)
+        self.logger.set_arg_only(str(id(self)))
         self.mongo_adapter = mongo_adapter
         # load keyword extractor and sentiment analyser
         self.kwe = yake.KeywordExtractor()
@@ -58,6 +62,7 @@ class DSJobExecutor:
         # find items in extract_tbl which does not have schedule_type (same as info) field defined
         unextracted = extract_tbl.find({schedule_type: {"$exists": False}})
         count = 0
+        total_dict = {}
         for document in unextracted:
             count += 1
             # WARN: extracted_data field represents any kind of extracted data
@@ -76,11 +81,23 @@ class DSJobExecutor:
                     if len(extracted_data) > 0:
                         print('[DEBUG][' + schedule_id + '] found locations: ' + str(len(extracted_data)) +
                               ' in doc id: ' + str(document['_id']))
+                        for key in extracted_data:
+                            if key in total_dict:
+                                # save count
+                                total_dict[key]['count'] = total_dict[key]['count'] + 1
+                            else:
+                                total_dict[key] = {}
+                                total_dict[key]['count'] = 1
                 case 'sentiment_analysis':
                     extracted_data = self.sentiment.polarity_scores(text_string)
             # WARN: extracted_data can be list or dict
             extract_tbl.update_one(document, {'$set': {schedule_type: extracted_data}})
         report = {'modified_documents': count}
+        if schedule_type == 'location_extraction':
+            # load location info
+            for loc_name in total_dict:
+                total_dict[loc_name]['cords'] = self.loc_dict[loc_name]
+            report['locations'] = total_dict
         return report
 
 

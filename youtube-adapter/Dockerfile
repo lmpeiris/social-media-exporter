@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY *.py .
 
+# Copy config files
+COPY conf /conf
+
 # Expose port 9130
 EXPOSE 9130
 

@@ -3,6 +3,7 @@ from prometheus_client import start_http_server, Gauge, CollectorRegistry
 import time
 import os
 import pymongo.collection
+import logging.config
 import sys
 sys.path.insert(0, '../common_lib/')
 from DbAdapterClass import MongoAdapter
@@ -114,6 +115,9 @@ if __name__ == '__main__':
     # how fast the program pulls data
     CYCLE_TIME = 600
     ############################################
+    # initialise logger
+    logging.config.fileConfig('../conf/logging.conf')
+    logger = logging.getLogger('scriptLogger')
     # creating python-youtube client based custom class - object
     # TODO: detect error when session times out and handle reconnect
     yt_api = YtHelperMongo(api_key=YT_API_KEY)

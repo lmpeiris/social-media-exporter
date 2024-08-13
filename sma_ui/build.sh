@@ -1,5 +1,6 @@
 echo "copying common libs to working directory....."
 cp ../common_lib/*.py .
+cp -r ../conf .
 echo "starting docker build"
 docker build -t lmpeiris/sma-ui:latest .
 echo "Running container"
